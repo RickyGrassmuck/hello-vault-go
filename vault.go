@@ -2,23 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
 	vault "github.com/hashicorp/vault/api"
-	"github.com/hashicorp/vault/api/auth/approle"
+	"github.com/hashicorp/vault/api/auth/ldap"
 )
 
 type VaultParameters struct {
 	// connection parameters
-	address             string
-	approleRoleID       string
-	approleSecretIDFile string
+	address      string
+	ldapUsername string
+	ldapPassword string
 
 	// the locations of our two secrets
-	apiKeyPath              string
-	databaseCredentialsPath string
+	apiKeyPath string
 }
 
 type Vault struct {
@@ -26,10 +24,10 @@ type Vault struct {
 	parameters VaultParameters
 }
 
-// NewVaultAppRoleClient logs in to Vault using the AppRole authentication
+// NewVaultLDAPClient logs in to Vault using the LDAP authentication
 // method, returning an authenticated client and the auth token itself, which
 // can be periodically renewed.
-func NewVaultAppRoleClient(ctx context.Context, parameters VaultParameters) (*Vault, *vault.Secret, error) {
+func NewVaultLDAPClient(ctx context.Context, parameters VaultParameters) (*Vault, *vault.Secret, error) {
 	log.Printf("connecting to vault @ %s", parameters.address)
 
 	config := vault.DefaultConfig() // modify for more granular configuration
@@ -65,30 +63,29 @@ func NewVaultAppRoleClient(ctx context.Context, parameters VaultParameters) (*Va
 // ref: https://learn.hashicorp.com/tutorials/vault/secure-introduction?in=vault/app-integration#trusted-orchestrator
 // ref: https://learn.hashicorp.com/tutorials/vault/approle-best-practices?in=vault/auth-methods#secretid-delivery-best-practices
 func (v *Vault) login(ctx context.Context) (*vault.Secret, error) {
-	log.Printf("logging in to vault with approle auth; role id: %s", v.parameters.approleRoleID)
+	log.Printf("logging in to vault with ldap auth; username id: %s", v.parameters.ldapUsername)
 
-	approleSecretID := &approle.SecretID{
-		FromFile: v.parameters.approleSecretIDFile,
+	ldapPassword := &ldap.Password{
+		FromString: v.parameters.ldapPassword,
 	}
 
-	appRoleAuth, err := approle.NewAppRoleAuth(
-		v.parameters.approleRoleID,
-		approleSecretID,
-		approle.WithWrappingToken(), // only required if the SecretID is response-wrapped
+	ldapAuth, err := ldap.NewLDAPAuth(
+		v.parameters.ldapUsername,
+		ldapPassword,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("unable to initialize approle authentication method: %w", err)
+		return nil, fmt.Errorf("unable to initialize LDAP authentication method: %w", err)
 	}
 
-	authInfo, err := v.client.Auth().Login(ctx, appRoleAuth)
+	authInfo, err := v.client.Auth().Login(ctx, ldapAuth)
 	if err != nil {
-		return nil, fmt.Errorf("unable to login using approle auth method: %w", err)
+		return nil, fmt.Errorf("unable to login using LDAP auth method: %w", err)
 	}
 	if authInfo == nil {
-		return nil, fmt.Errorf("no approle info was returned after login")
+		return nil, fmt.Errorf("no LDAP info was returned after login")
 	}
 
-	log.Println("logging in to vault with approle auth: success!")
+	log.Println("logging in to vault with LDAP auth: success!")
 
 	return authInfo, nil
 }
@@ -104,36 +101,10 @@ func (v *Vault) GetSecretAPIKey(ctx context.Context) (map[string]interface{}, er
 
 	data, ok := secret.Data["data"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("malformed secret returned")
+		return nil, fmt.Errorf("malformed secret returned: %v", data)
 	}
 
 	log.Println("getting secret api key from vault: success!")
 
 	return data, nil
-}
-
-// GetDatabaseCredentials retrieves a new set of temporary database credentials
-func (v *Vault) GetDatabaseCredentials(ctx context.Context) (DatabaseCredentials, *vault.Secret, error) {
-	log.Println("getting temporary database credentials from vault")
-
-	secret, err := v.client.Logical().Read(v.parameters.databaseCredentialsPath)
-	if err != nil {
-		return DatabaseCredentials{}, nil, fmt.Errorf("unable to read secret: %w", err)
-	}
-
-	credentialsBytes, err := json.Marshal(secret.Data)
-	if err != nil {
-		return DatabaseCredentials{}, nil, fmt.Errorf("malformed credentials returned: %w", err)
-	}
-
-	var credentials DatabaseCredentials
-
-	if err := json.Unmarshal(credentialsBytes, &credentials); err != nil {
-		return DatabaseCredentials{}, nil, fmt.Errorf("unable to unmarshal credentials: %w", err)
-	}
-
-	log.Println("getting temporary database credentials from vault: success!")
-
-	// raw secret is included to renew database credentials
-	return credentials, secret, nil
 }

@@ -48,43 +48,6 @@ func (v *Vault) RenewLoginPeriodically(ctx context.Context, authToken *vault.Sec
 	}
 }
 
-// RenewDatabaseCredentialsPeriodically uses a similar mechnanism to the one
-// above in order to keep the database connection alive after the database
-// dynamic secret expires and needs to be renewed or recreated
-func (v *Vault) RenewDatabaseCredentialsPeriodically(
-	ctx context.Context,
-	databaseSecret *vault.Secret,
-	reconnect func(ctx context.Context, credentials DatabaseCredentials) error,
-) {
-	/* */ log.Println("database credentials renew / reconnect loop: begin")
-	defer log.Println("database credentials renew / reconnect loop: end")
-
-	for {
-		currentDatabaseSecret := databaseSecret
-
-		for {
-			if err := v.renewUntilMaxTTL(ctx, currentDatabaseSecret, "database credentials"); err != nil {
-				// break out when shutdown is requested
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-
-				log.Fatalf("database credentials renew error: %v", err) // simplified error handling
-			}
-
-			// database credentials have expired and need to be renewed
-			credentials, secret, err := v.GetDatabaseCredentials(ctx)
-			if err != nil {
-				log.Fatalf("database credentials error: %v", err) // simplified error handling
-			}
-
-			reconnect(ctx, credentials)
-
-			currentDatabaseSecret = secret
-		}
-	}
-}
-
 // renewUntilMaxTTL is a blocking helper function that uses LifetimeWatcher to
 // periodically renew the given secret or token when it is close to its
 // 'token_ttl' lease expiration time until it reaches its 'token_max_ttl' lease
