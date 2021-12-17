@@ -7,7 +7,6 @@ require (
 	github.com/hashicorp/vault/api v1.3.0
 	github.com/hashicorp/vault/api/auth/ldap v0.1.0
 	github.com/jessevdk/go-flags v1.5.0
-	github.com/lib/pq v1.10.4
 )
 
 replace github.com/hashicorp/vault/api => /workspaces/vault/api
